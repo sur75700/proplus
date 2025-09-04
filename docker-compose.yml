@@ -1,0 +1,31 @@
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: proplus_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: proplus_app
+    depends_on:
+      - mongo
+    environment:
+      - MONGO_URI=mongodb://mongo:27017
+      - MONGO_DB=proplus
+      - MONGO_COLLECTION=finance
+      - REPORTS_DIR=/app/data_analytics/reports
+    volumes:
+      - ./automation:/app/automation
+      - ./data_analytics/reports:/app/data_analytics/reports
+    working_dir: /app/automation
+    command: bash
+    tty: true
+
+volumes:
+  mongo_data:
