@@ -1,17 +1,16 @@
+version: "3.9"
+
 services:
   mongo:
     image: mongo:6.0
     container_name: proplus_mongo
-    restart: unless-stopped
     ports:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
 
   app:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
+    image: proplus-app
     container_name: proplus_app
     depends_on:
       - mongo
@@ -19,13 +18,15 @@ services:
       - MONGO_URI=mongodb://mongo:27017
       - MONGO_DB=proplus
       - MONGO_COLLECTION=finance
-      - REPORTS_DIR=/app/data_analytics/reports
+      - GOAL_AMOUNT=300000
+      - GOAL_DATE=2025-09-26
     volumes:
-      - ./automation:/app/automation
-      - ./data_analytics/reports:/app/data_analytics/reports
+      - .:/app
     working_dir: /app/automation
-    command: bash
-    tty: true
+    command: bash -lc "sleep infinity"
+    ports:
+      - "8501:8501"
 
 volumes:
   mongo_data:
+
