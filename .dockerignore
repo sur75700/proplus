@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+.git
+.gitignore
+mongo_backups/
+data_analytics/reports/*.png
+data_analytics/reports/*.pdf
