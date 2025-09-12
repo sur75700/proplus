@@ -44,3 +44,5 @@ quick:
 	$(MAKE) report
 	$(MAKE) email
 
+health:
+	docker compose exec app bash -lc "curl -s http://localhost:8501/_stcore/health || true"
