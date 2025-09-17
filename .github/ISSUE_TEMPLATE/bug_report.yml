@@ -1,0 +1,9 @@
+name: Bug report
+description: Report an issue
+title: "[bug]: "
+labels: [bug]
+body:
+  - type: textarea
+    attributes: {label: Steps to Reproduce}
+  - type: textarea
+    attributes: {label: Logs/Screenshots}

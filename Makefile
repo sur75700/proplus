@@ -46,3 +46,14 @@ quick:
 
 health:
 	docker compose exec app bash -lc "curl -s http://localhost:8501/_stcore/health || true"
+
+.PHONY: demo package
+demo:
+\tmake add income=12000 debt=3000 savings=2000
+\tmake report
+
+package:
+\tmkdir -p dist
+\tzip -r dist/proplus_$(shell cat VERSION).zip \
+\t  docker-compose.yml Dockerfile automation scripts data_analytics \
+\t  README.md LICENSE .env.example
