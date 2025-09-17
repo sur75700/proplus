@@ -20,3 +20,5 @@ docker compose up -d
 make add income=12000 debt=3000 savings=2000
 make report
 make email
+![CI](https://github.com/sur75700/proplus/actions/workflows/ci.yml/badge.svg)
+
