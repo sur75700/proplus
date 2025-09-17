@@ -1,4 +1,12 @@
-automation/.env
-backups/
-logs/
-*.swp
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/
+dist/
+build/
+*.egg-info/
+.env
+.env.*
