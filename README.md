@@ -21,4 +21,22 @@ make add income=12000 debt=3000 savings=2000
 make report
 make email
 ![CI](https://github.com/sur75700/proplus/actions/workflows/ci.yml/badge.svg)
+# 🚀 ProPlus
+
+![CI](https://github.com/sur75700/proplus/actions/workflows/ci.yml/badge.svg)
+
+ProPlus – Professional backend & security toolkit built with **FastAPI + MongoDB + Docker**.  
+Designed for **DevSecOps**, penetration testing, and secure analytics.
+
+---
+
+## 📦 Quickstart
+
+```bash
+# Clone repo
+git clone git@github.com:sur75700/proplus.git
+cd proplus
+
+# Build & run with Docker
+docker-compose up --build
 

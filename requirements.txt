@@ -1,2 +1,6 @@
-streamlit==1.38.0
-pandas==2.2.2
+fastapi
+uvicorn[standard]
+passlib[bcrypt]
+motor
+python-dotenv
+pydantic-settings
