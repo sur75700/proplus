@@ -2,59 +2,32 @@ version: "3.9"
 
 services:
   mongo:
-    image: mongo:6.0
-    container_name: proplus_mongo
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-
-  app:
-    image: proplus-app
-    container_name: proplus_app
-    depends_on:
-      - mongo
-    environment:
-      - MONGO_URI=mongodb://mongo:27017
-      - MONGO_DB=proplus
-      - MONGO_COLLECTION=finance
-      - GOAL_AMOUNT=300000
-      - GOAL_DATE=2025-09-26
-    volumes:
-      - .:/app
-    working_dir: /app/automation
-    command: bash -lc "sleep infinity"
-    ports:
-      - "8501:8501"
-
-volumes:
-  mongo_data:
-
-services:
-  app:
-    image: ${IMAGE_REF:-<your-dockerhub-username>/proplus-app:latest}
-    # build: .        # dev-ի համար թող stays, բայց prod-ում image-ը կհերիքի
-
-services:
-  mongo:
     image: mongo:7
+    container_name: proplus-mongo
+    restart: unless-stopped
     ports:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
 
   api:
-    build: .
-    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: proplus-app
+    restart: unless-stopped
+    env_file:
+      - .env
     environment:
-      - MONGO_URL=mongodb://mongo:27017
-      - MONGO_DB=proplus
-      - JWT_SECRET=change_me_super_secret
-      - JWT_EXPIRES_MIN=60
+      - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
+      - MONGO_DB=${MONGO_DB:-proplus}
+      - JWT_SECRET=${JWT_SECRET:-change_me_super_secret}
+      - JWT_EXPIRES_MIN=${JWT_EXPIRES_MIN:-60}
     ports:
       - "8000:8000"
     depends_on:
       - mongo
-
+    volumes:
+      - .:/app
 volumes:
   mongo_data:
