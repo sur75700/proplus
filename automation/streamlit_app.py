@@ -17,6 +17,7 @@ MONGO_COLLECTION = os.getenv("MONGO_COLLECTION", "finance")
 
 SAVINGS_GOAL = float(os.getenv("SAVINGS_GOAL", "300000"))  # change via env if needed
 
+
 # ---------- DB ----------
 @st.cache_resource
 def get_collection():
@@ -24,7 +25,9 @@ def get_collection():
     db = client[MONGO_DB]
     return db[MONGO_COLLECTION]
 
+
 collection = get_collection()
+
 
 # ---------- Helpers ----------
 def _to_df(docs: list[dict]) -> pd.DataFrame:
@@ -35,7 +38,9 @@ def _to_df(docs: list[dict]) -> pd.DataFrame:
     # Normalize timestamp column
     if "ts" in df.columns:
         # handle both str and datetime
-        df["ts"] = pd.to_datetime(df["ts"], errors="coerce", utc=True).dt.tz_convert(None)
+        df["ts"] = pd.to_datetime(df["ts"], errors="coerce", utc=True).dt.tz_convert(
+            None
+        )
     else:
         df["ts"] = pd.NaT
 
@@ -49,18 +54,22 @@ def _to_df(docs: list[dict]) -> pd.DataFrame:
     df = df.sort_values("ts").reset_index(drop=True)
     return df
 
+
 def insert_record(income: float, debt: float, savings: float) -> ObjectId:
     doc = {
         "income": float(income),
         "debt": float(debt),
         "savings": float(savings),
-        "ts": datetime.now(timezone.utc)
+        "ts": datetime.now(timezone.utc),
     }
     res = collection.insert_one(doc)
     return res.inserted_id
 
+
 # ---------- UI ----------
-st.set_page_config(page_title="💰 ProPlus Finance Dashboard", page_icon="💰", layout="wide")
+st.set_page_config(
+    page_title="💰 ProPlus Finance Dashboard", page_icon="💰", layout="wide"
+)
 st.title("💰 ProPlus Finance Dashboard")
 
 with st.sidebar:
@@ -77,7 +86,10 @@ with st.sidebar:
     st.divider()
     st.caption("⚙️ Settings")
     goal_val = st.number_input(
-        "Savings goal (override runtime)", min_value=0.0, step=5000.0, value=SAVINGS_GOAL
+        "Savings goal (override runtime)",
+        min_value=0.0,
+        step=5000.0,
+        value=SAVINGS_GOAL,
     )
 
 # Load data
@@ -86,7 +98,9 @@ df = _to_df(docs)
 
 # Empty-state
 if df.empty:
-    st.warning("⛔ Database is empty. Add a record from the left panel or run `make add ...`.")
+    st.warning(
+        "⛔ Database is empty. Add a record from the left panel or run `make add ...`."
+    )
     st.stop()
 
 # ---------- KPIs ----------
@@ -127,4 +141,6 @@ st.dataframe(df.tail(20), use_container_width=True)
 # ---------- Download ----------
 st.subheader("⬇️ Export")
 csv = df.to_csv(index=False).encode("utf-8")
-st.download_button("Download CSV", data=csv, file_name="finance_data.csv", mime="text/csv")
+st.download_button(
+    "Download CSV", data=csv, file_name="finance_data.csv", mime="text/csv"
+)

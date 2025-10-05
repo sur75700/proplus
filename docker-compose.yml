@@ -1,5 +1,4 @@
-version: "3.9"
-
+name: proplus
 services:
   mongo:
     image: mongo:7
@@ -13,21 +12,27 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile
     container_name: proplus-app
     restart: unless-stopped
     env_file:
       - .env
     environment:
-      - MONGO_URL=${MONGO_URL:-mongodb://mongo:27017}
-      - MONGO_DB=${MONGO_DB:-proplus}
-      - JWT_SECRET=${JWT_SECRET:-change_me_super_secret}
-      - JWT_EXPIRES_MIN=${JWT_EXPIRES_MIN:-60}
+      MONGO_URL: ${MONGO_URL:-mongodb://mongo:27017}
+      MONGO_DB: ${MONGO_DB:-proplus}
+      JWT_SECRET: ${JWT_SECRET:-change_me_super_secret}
+      JWT_EXPIRES_MIN: ${JWT_EXPIRES_MIN:-60}
     ports:
       - "8000:8000"
     depends_on:
       - mongo
     volumes:
       - .:/app
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/healthz || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
 volumes:
   mongo_data:

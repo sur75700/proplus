@@ -23,9 +23,9 @@ import matplotlib.pyplot as plt
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
-MONGO_URI  = os.getenv("MONGO_URI", "mongodb://localhost:27017")
-MONGO_DB   = os.getenv("MONGO_DB", "proplus")
-MONGO_COL  = os.getenv("MONGO_COLLECTION", "finance")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+MONGO_DB = os.getenv("MONGO_DB", "proplus")
+MONGO_COL = os.getenv("MONGO_COLLECTION", "finance")
 
 REPORTS_DIR = Path(os.getenv("REPORTS_DIR", ROOT.parent / "data_analytics" / "reports"))
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -46,8 +46,8 @@ def get_collection():
 def fetch_valid_docs(col):
     """Return only documents that surely have income/debt/savings, sorted by ts."""
     query = {
-        "income":  {"$exists": True},
-        "debt":    {"$exists": True},
+        "income": {"$exists": True},
+        "debt": {"$exists": True},
         "savings": {"$exists": True},
     }
     return list(col.find(query).sort("ts", 1))
@@ -59,10 +59,10 @@ def cmd_add(args):
     now = dt.datetime.now()
 
     record = {
-        "income":  int(args.income),
-        "debt":    int(args.debt),
+        "income": int(args.income),
+        "debt": int(args.debt),
         "savings": int(args.savings),
-        "ts":      now,
+        "ts": now,
     }
     res = col.insert_one(record)
     print(f"✅ Data saved to MongoDB: {record} | _id={res.inserted_id}")
@@ -76,8 +76,8 @@ def cmd_plot(args):
         return
 
     x = [d.get("ts") or dt.datetime.now() for d in data]
-    income  = [d.get("income", 0)  for d in data]
-    debt    = [d.get("debt", 0)    for d in data]
+    income = [d.get("income", 0) for d in data]
+    debt = [d.get("debt", 0) for d in data]
     savings = [d.get("savings", 0) for d in data]
 
     plt.figure(figsize=(8, 5))
@@ -100,8 +100,8 @@ def build_parser():
     sub = p.add_subparsers(dest="cmd", required=True)
 
     p_add = sub.add_parser("add", help="Add a new record")
-    p_add.add_argument("--income",  required=True, type=int)
-    p_add.add_argument("--debt",    required=True, type=int)
+    p_add.add_argument("--income", required=True, type=int)
+    p_add.add_argument("--debt", required=True, type=int)
     p_add.add_argument("--savings", required=True, type=int)
     p_add.set_defaults(func=cmd_add)
 

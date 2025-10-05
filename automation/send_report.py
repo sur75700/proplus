@@ -1,4 +1,7 @@
-import os, glob, smtplib, traceback
+import os
+import glob
+import smtplib
+import traceback
 from dotenv import load_dotenv
 from email.message import EmailMessage
 from datetime import datetime
@@ -7,14 +10,16 @@ load_dotenv()
 
 EMAIL_USER = os.getenv("EMAIL_USER")
 EMAIL_PASS = os.getenv("EMAIL_PASS")
-EMAIL_TO   = [e.strip() for e in os.getenv("EMAIL_TO","").split(",") if e.strip()]
-SMTP_HOST  = os.getenv("SMTP_HOST","smtp.gmail.com")
-SMTP_PORT  = int(os.getenv("SMTP_PORT","587"))
-REPORTS_DIR = os.getenv("REPORTS_DIR","../data_analytics/reports")
+EMAIL_TO = [e.strip() for e in os.getenv("EMAIL_TO", "").split(",") if e.strip()]
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+REPORTS_DIR = os.getenv("REPORTS_DIR", "../data_analytics/reports")
 
-def latest(mask): 
-    files = glob.glob(mask); 
+
+def latest(mask):
+    files = glob.glob(mask)
     return max(files, key=os.path.getmtime) if files else None
+
 
 def build_and_send():
     print(f"FROM: {EMAIL_USER}")
@@ -33,12 +38,16 @@ def build_and_send():
     msg.set_content("Կցված են վերջին հաշվետվությունների PDF/PNG ֆայլերը։")
 
     for f in [summary, pdf, png]:
-        if not f: 
+        if not f:
             continue
         with open(f, "rb") as fp:
             data = fp.read()
-        maintype, subtype = ("application","pdf") if f.endswith(".pdf") else ("image","png")
-        msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=os.path.basename(f))
+        maintype, subtype = (
+            ("application", "pdf") if f.endswith(".pdf") else ("image", "png")
+        )
+        msg.add_attachment(
+            data, maintype=maintype, subtype=subtype, filename=os.path.basename(f)
+        )
 
     try:
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as s:
@@ -51,7 +60,7 @@ def build_and_send():
         print("❌ SEND FAILED:", e)
         traceback.print_exc()
 
+
 if __name__ == "__main__":
     os.makedirs(REPORTS_DIR, exist_ok=True)
     build_and_send()
-

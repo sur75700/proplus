@@ -1,25 +1,88 @@
-from fastapi import APIRouter, HTTPException
-from models import UserCreate, UserOut, LoginIn
+# auth.py
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel, EmailStr
+from bson import ObjectId
+import jwt
+
+import db as dbmod
 from utils import hash_password, verify_password, make_jwt
-from db import db
+from settings import settings
 
-router = APIRouter()
+router = APIRouter(prefix="/auth", tags=["auth"])
+security = HTTPBearer()
 
 
-@router.post("/register", response_model=UserOut)
+# --------- Pydantic Schemas ---------
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+
+# --------- Helpers ---------
+async def get_current_user(
+    creds: HTTPAuthorizationCredentials = Depends(security),
+):
+    token = creds.credentials
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    uid = payload.get("sub")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    if dbmod.db is None:
+        raise HTTPException(status_code=503, detail="DB not ready")
+
+    user = await dbmod.db.users.find_one({"_id": ObjectId(uid)})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {"_id": str(user["_id"]), "email": user["email"]}
+
+
+# --------- Routes ---------
+@router.post("/register")
 async def register(user: UserCreate):
-    existing = await db.users.find_one({"email": user.email})
+    if dbmod.db is None:
+        raise HTTPException(status_code=503, detail="DB not ready")
+
+    existing = await dbmod.db.users.find_one({"email": user.email})
     if existing:
-        raise HTTPException(400, "User already exists")
-    doc = {"email": user.email, "password": hash_password(user.password)}
-    res = await db.users.insert_one(doc)
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    doc = {
+        "email": user.email,
+        "password": hash_password(user.password),
+    }
+    res = await dbmod.db.users.insert_one(doc)
     return {"_id": str(res.inserted_id), "email": user.email}
 
 
 @router.post("/login")
 async def login(data: LoginIn):
-    user = await db.users.find_one({"email": data.email})
+    if dbmod.db is None:
+        raise HTTPException(status_code=503, detail="DB not ready")
+
+    user = await dbmod.db.users.find_one({"email": data.email})
     if not user or not verify_password(data.password, user["password"]):
-        raise HTTPException(401, "Invalid credentials")
+        # Կանոնավոր սխալ՝ ոչ թե 500
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
     token = make_jwt(str(user["_id"]))
+    # Վերադարձնում ենք մաքուր JSON մեկ օբյեկտով
     return {"access_token": token, "token_type": "bearer"}
+
+
+@router.get("/me")
+async def me(current=Depends(get_current_user)):
+    return current
