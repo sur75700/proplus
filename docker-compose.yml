@@ -1,0 +1,29 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./app:/app/app
+      # 🔐 bind-mount RSA keys into the expected paths
+      - ./secrets/jwt_private.pem:/run/secrets/jwt_private_key:ro
+      - ./secrets/jwt_public.pem:/run/secrets/jwt_public_key:ro
+    depends_on:
+      - mongo
+      - redis
+
+  mongo:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+volumes:
+  mongo_data:

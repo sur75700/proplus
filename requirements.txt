@@ -1,0 +1,11 @@
+pydantic-settings==2.4.0
+aiosmtplib==2.0.2
+fastapi
+uvicorn[standard]
+motor
+python-jose==3.3.0
+passlib[bcrypt]==1.7.4
+cryptography
+email-validator
+redis==5.0.8
+bcrypt<4.0.0
