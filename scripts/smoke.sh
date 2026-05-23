@@ -39,7 +39,17 @@ echo "👑 [4] login"
 curl -fsS -X POST "$API/auth/login" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}" \
-  | tee "$LOGIN_JSON"
+  > "$LOGIN_JSON"
+python3 - "$LOGIN_JSON" <<'PY2'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+print({
+    "access_token": bool(data.get("access_token")),
+    "refresh_token": bool(data.get("refresh_token")),
+    "token_type": data.get("token_type"),
+})
+PY2
 echo
 echo
 
@@ -77,7 +87,17 @@ echo "👑 [6] refresh"
 curl -fsS -X POST "$API/auth/refresh" \
   -H "Content-Type: application/json" \
   -d "{\"refresh_token\":\"$REFRESH_TOKEN\"}" \
-  | tee "$REFRESH_JSON"
+  > "$REFRESH_JSON"
+python3 - "$REFRESH_JSON" <<'PY2'
+import json, sys
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+print({
+    "access_token": bool(data.get("access_token")),
+    "refresh_token": bool(data.get("refresh_token")),
+    "token_type": data.get("token_type"),
+})
+PY2
 echo
 echo
 
