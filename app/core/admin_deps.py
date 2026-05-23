@@ -1,20 +1,62 @@
-from fastapi import Depends, HTTPException, Header
+from bson import ObjectId
+from fastapi import Header, HTTPException, status
 from jose import JWTError
-from ..core.jwt_utils import decode_token
-from ..models import get_user_by_id
 
-async def admin_required(authorization: str = Header(None)):
+from ..db import users
+from .jwt_utils import decode_token
+
+
+def _extract_bearer(authorization: str | None) -> str:
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "No bearer token")
-    token = authorization.split(" ", 1)[1]
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No bearer token",
+        )
+    return authorization.split(" ", 1)[1]
+
+
+def _decode_or_401(token: str) -> dict:
     try:
-        payload = decode_token(token)
+        return decode_token(token)
     except JWTError:
-        raise HTTPException(401, "Invalid token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token",
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token",
+        )
+
+
+async def admin_required(authorization: str = Header(None)) -> dict:
+    payload = _decode_or_401(_extract_bearer(authorization))
+
+    if payload.get("typ") != "access":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="access token required",
+        )
+
     uid = payload.get("sub")
-    user = await get_user_by_id(uid)
+    if not uid or not ObjectId.is_valid(uid):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token subject",
+        )
+
+    user = await users.find_one({"_id": ObjectId(uid)})
     if not user:
-        raise HTTPException(401, "User not found")
-    if user.get("role") != "admin":
-        raise HTTPException(403, "Admin only")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token user",
+        )
+
+    if user.get("role", "user") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="admin required",
+        )
+
     return user

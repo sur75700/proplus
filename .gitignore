@@ -1,16 +1,61 @@
-# artifacts
-scans/
-captures/
-*.pcap
+# ==============================
+# Python
+# ==============================
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+
+# ==============================
+# Environment / secrets / crypto
+# ==============================
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.asc
+*.gpg
+
+# ==============================
+# Local arsenal tools
+# Keep outside product repo
+# ==============================
+CiLocks/
+TheFatRat/
+hound/
+turbo-attack/
+phonextract/
+
+# ==============================
+# Payloads / binaries / lab artifacts
+# ==============================
+payload.exe
+*.exe
+*.apk
+my
+vuln
+vuln.c
+
+# ==============================
+# Scan / evidence artifacts
+# ==============================
 *.nmap
 *.gnmap
 *.xml
+nikto_report.html.htm
+report.html.htm
+tcp_connect.txt
+udp_check.txt
 
-# local stuff
-.env
+# ==============================
+# Local backups / swap / editor
+# ==============================
+*.swp
+*.bak
+*.backup*
+dump_*.archive
+.DS_Store
 .vscode/
-__pycache__/
-*.pyc
 node_modules/
-# temp backups
-tools/*.bak
