@@ -24,7 +24,7 @@ logs:
 
 wait-api:
 >@echo "👑 Waiting for API health..."
->@for i in {1..30}; do \
+>@for i in {1..90}; do \
 >  STATUS="$$(docker inspect -f '{{.State.Health.Status}}' data_analytics-api-1 2>/dev/null || echo starting)"; \
 >  echo "api health: $$STATUS"; \
 >  if [ "$$STATUS" = "healthy" ]; then exit 0; fi; \
@@ -32,7 +32,12 @@ wait-api:
 >done; \
 >echo "❌ API did not become healthy"; \
 >docker compose ps; \
->docker compose logs --tail=120 api; \
+>echo "👑 API LOGS"; \
+>docker compose logs --tail=200 api; \
+>echo "👑 MONGO LOGS"; \
+>docker compose logs --tail=120 mongo; \
+>echo "👑 REDIS LOGS"; \
+>docker compose logs --tail=120 redis; \
 >exit 1
 
 health:
