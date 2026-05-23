@@ -162,17 +162,47 @@ async def refresh_token(request: Request, refresh_token: str = Body(..., embed=T
     if not is_refresh(payload):
         raise HTTPException(status_code=400, detail="not a refresh token")
 
-    h = jti_hash(payload["jti"])
-    doc = await refresh_tokens.find_one({"jti_hash": h, "revoked": False})
+    sub = payload.get("sub")
+    jti = payload.get("jti")
+
+    if not sub or not ObjectId.is_valid(sub) or not jti:
+        raise HTTPException(status_code=401, detail="refresh invalid")
+
+    h = jti_hash(jti)
+    doc = await refresh_tokens.find_one({"jti_hash": h})
+
     if not doc:
+        await log_event("refresh_invalid", sub, {"reason": "unknown_jti"})
         raise HTTPException(status_code=401, detail="refresh invalid or revoked")
+
+    if doc.get("revoked"):
+        await refresh_tokens.update_many(
+            {"user_id": ObjectId(sub), "revoked": False},
+            {"$set": {"revoked": True, "revoked_at": int(time.time()), "revoked_reason": "reuse_detected"}},
+        )
+        await log_event(
+            "refresh_reuse",
+            sub,
+            {
+                "jti_hash": h,
+                "fp": fingerprint_from_request(request),
+            },
+        )
+        raise HTTPException(status_code=401, detail="refresh token reuse detected")
+
+    if doc.get("expires_at", 0) < int(time.time()):
+        await refresh_tokens.update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"revoked": True, "revoked_at": int(time.time()), "revoked_reason": "expired"}},
+        )
+        await log_event("refresh_expired", sub, {"jti_hash": h})
+        raise HTTPException(status_code=401, detail="refresh expired")
 
     await refresh_tokens.update_one(
         {"_id": doc["_id"]},
-        {"$set": {"revoked": True, "revoked_at": int(time.time())}},
+        {"$set": {"revoked": True, "revoked_at": int(time.time()), "revoked_reason": "rotated"}},
     )
 
-    sub = payload["sub"]
     new_jti = str(uuid.uuid4())
     new_refresh = create_refresh(sub, new_jti)
 

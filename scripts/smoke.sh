@@ -17,6 +17,35 @@ echo "API:   $API"
 echo "EMAIL: $EMAIL"
 echo
 
+extract_token() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+path, key = sys.argv[1], sys.argv[2]
+with open(path) as f:
+    data = json.load(f)
+
+print(data.get(key, ""))
+PY
+}
+
+redacted_token_summary() {
+  python3 - "$1" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1]) as f:
+    data = json.load(f)
+
+print({
+    "access_token": bool(data.get("access_token")),
+    "refresh_token": bool(data.get("refresh_token")),
+    "token_type": data.get("token_type"),
+})
+PY
+}
+
 echo "👑 [1] healthz"
 curl -fsS "$API/healthz"
 echo
@@ -40,34 +69,12 @@ curl -fsS -X POST "$API/auth/login" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}" \
   > "$LOGIN_JSON"
-python3 - "$LOGIN_JSON" <<'PY2'
-import json, sys
-with open(sys.argv[1]) as f:
-    data = json.load(f)
-print({
-    "access_token": bool(data.get("access_token")),
-    "refresh_token": bool(data.get("refresh_token")),
-    "token_type": data.get("token_type"),
-})
-PY2
+redacted_token_summary "$LOGIN_JSON"
 echo
 echo
 
-ACCESS_TOKEN="$(python3 - "$LOGIN_JSON" <<'PY'
-import json, sys
-with open(sys.argv[1]) as f:
-    data = json.load(f)
-print(data.get("access_token", ""))
-PY
-)"
-
-REFRESH_TOKEN="$(python3 - "$LOGIN_JSON" <<'PY'
-import json, sys
-with open(sys.argv[1]) as f:
-    data = json.load(f)
-print(data.get("refresh_token", ""))
-PY
-)"
+ACCESS_TOKEN="$(extract_token "$LOGIN_JSON" access_token)"
+REFRESH_TOKEN="$(extract_token "$LOGIN_JSON" refresh_token)"
 
 if [ -z "$ACCESS_TOKEN" ] || [ -z "$REFRESH_TOKEN" ]; then
   echo "❌ Missing access or refresh token"
@@ -88,33 +95,32 @@ curl -fsS -X POST "$API/auth/refresh" \
   -H "Content-Type: application/json" \
   -d "{\"refresh_token\":\"$REFRESH_TOKEN\"}" \
   > "$REFRESH_JSON"
-python3 - "$REFRESH_JSON" <<'PY2'
-import json, sys
-with open(sys.argv[1]) as f:
-    data = json.load(f)
-print({
-    "access_token": bool(data.get("access_token")),
-    "refresh_token": bool(data.get("refresh_token")),
-    "token_type": data.get("token_type"),
-})
-PY2
+redacted_token_summary "$REFRESH_JSON"
 echo
 echo
 
-NEW_REFRESH_TOKEN="$(python3 - "$REFRESH_JSON" <<'PY'
-import json, sys
-with open(sys.argv[1]) as f:
-    data = json.load(f)
-print(data.get("refresh_token", ""))
-PY
-)"
+NEW_REFRESH_TOKEN="$(extract_token "$REFRESH_JSON" refresh_token)"
 
 if [ -z "$NEW_REFRESH_TOKEN" ]; then
   echo "❌ Missing rotated refresh token"
   exit 1
 fi
 
-echo "👑 [7] logout"
+echo "👑 [7] old refresh token reuse should be 401"
+REUSE_CODE="$(curl -s -o "$TMP_DIR/reuse.json" -w "%{http_code}" -X POST "$API/auth/refresh" \
+  -H "Content-Type: application/json" \
+  -d "{\"refresh_token\":\"$REFRESH_TOKEN\"}")"
+
+echo "refresh_reuse_http_status=$REUSE_CODE"
+if [ "$REUSE_CODE" != "401" ]; then
+  echo "❌ Expected 401 for refresh token reuse"
+  cat "$TMP_DIR/reuse.json"
+  echo
+  exit 1
+fi
+
+echo
+echo "👑 [8] logout"
 curl -fsS -X POST "$API/auth/logout" \
   -H "Content-Type: application/json" \
   -d "{\"refresh_token\":\"$NEW_REFRESH_TOKEN\"}" \
@@ -122,7 +128,7 @@ curl -fsS -X POST "$API/auth/logout" \
   -w "logout_http_status=%{http_code}\n"
 
 echo
-echo "👑 [8] invalid token returns 401"
+echo "👑 [9] invalid token returns 401"
 HTTP_CODE="$(curl -s -o "$TMP_DIR/invalid_token.json" -w "%{http_code}" "$API/auth/me" \
   -H "Authorization: Bearer bad.token.value")"
 
