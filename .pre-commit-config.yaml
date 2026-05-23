@@ -1,0 +1,19 @@
+repos:
+- repo: local
+  hooks:
+    - id: shellcheck-local
+      name: shellcheck
+      entry: shellcheck
+      language: system
+      types: [shell]
+      files: \.(sh|bash)$
+      args:
+        - --severity=warning
+        - --exclude=SC2012,SC2001,SC2094
+
+    - id: shfmt-local
+      name: shfmt
+      entry: shfmt
+      language: system
+      types: [shell]
+      files: \.(sh|bash)$
