@@ -91,3 +91,37 @@ PHASE 1D Part 3 - Refresh token reuse detection
 ## Next Recommended Phase
 
 PHASE 1E - Developer Experience and API Documentation Polish
+
+## Makefile Command Center
+
+Recommended daily start:
+
+make up
+make test-all
+
+Check status:
+
+make status
+
+View API logs:
+
+make logs
+
+Stop stack only when finished:
+
+make down
+
+Important rule:
+
+Do not run all Makefile commands in one line. In particular, do not run make down before make health, make smoke, make admin-smoke, or make test-all.
+
+Correct:
+
+make up
+make test-all
+
+Incorrect:
+
+make up
+make down
+make test-all
