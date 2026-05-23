@@ -1,0 +1,64 @@
+name: ProPlus Backend CI
+
+on:
+  push:
+    branches:
+      - master
+      - phase-1f-github-ci
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  backend-smoke:
+    name: Backend Docker Smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install host Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Prepare local env and JWT keys
+        run: |
+          cp .env.example .env
+          mkdir -p secrets
+          openssl genrsa -out secrets/jwt_private.pem 4096
+          openssl rsa -in secrets/jwt_private.pem -pubout -out secrets/jwt_public.pem
+          chmod 600 secrets/jwt_private.pem
+          chmod 644 secrets/jwt_public.pem
+
+      - name: Build and start Docker stack
+        run: |
+          docker compose up -d --build
+          make wait-api
+
+      - name: Run OpenAPI summary
+        run: |
+          make openapi
+
+      - name: Run full smoke suite
+        run: |
+          make test-all
+
+      - name: Show Docker logs on failure
+        if: failure()
+        run: |
+          docker compose ps
+          docker compose logs --tail=200 api
+          docker compose logs --tail=120 mongo
+          docker compose logs --tail=120 redis
+
+      - name: Stop Docker stack
+        if: always()
+        run: |
+          docker compose down --remove-orphans
