@@ -1,61 +1,56 @@
-# ==============================
-# Python
-# ==============================
-__pycache__/
-*.py[cod]
-.venv/
-.ipynb_checkpoints/
 
 # ==============================
-# Environment / secrets / crypto
-# ==============================
+*.apk
+*.asc
+*.backup*
+# Backup files
+*.bak
+*.bson
+CiLocks/
+*.csv
+.DS_Store
+dump/
+dump_*.archive
 .env
 .env.*
 !.env.example
-secrets/
-*.pem
-*.key
-*.asc
-*.gpg
-
-# ==============================
-# Local arsenal tools
-# Keep outside product repo
-# ==============================
-CiLocks/
-TheFatRat/
-hound/
-turbo-attack/
-phonextract/
-
-# ==============================
-# Payloads / binaries / lab artifacts
-# ==============================
-payload.exe
+# Environment / secrets / crypto
 *.exe
-*.apk
+# Generated reports / local analytics artifacts
+*.gnmap
+*.gpg
+hound/
+*.ipynb
+.ipynb_checkpoints/
+# Keep outside product repo
+*.key
+# Local arsenal tools
+# Local backups / swap / editor
+# Local migration/bootstrap scripts
+*.metadata.json
 my
+nikto_report.html.htm
+*.nmap
+node_modules/
+payload.exe
+# Payloads / binaries / lab artifacts
+*.pem
+phonextract/
+__pycache__/
+*.py[cod]
+# Python
+report.html.htm
+reports/
+# Scan / evidence artifacts
+secrets/
+setup_*.sh
+*.swp
+tcp_connect.txt
+TheFatRat/
+turbo-attack/
+udp_check.txt
+.venv/
+.vscode/
 vuln
 vuln.c
-
-# ==============================
-# Scan / evidence artifacts
-# ==============================
-*.nmap
-*.gnmap
 *.xml
-nikto_report.html.htm
-report.html.htm
-tcp_connect.txt
-udp_check.txt
-
-# ==============================
-# Local backups / swap / editor
-# ==============================
-*.swp
-*.bak
-*.backup*
-dump_*.archive
-.DS_Store
-.vscode/
-node_modules/
