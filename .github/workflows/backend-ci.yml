@@ -30,10 +30,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
 
-      - name: Run quality gates
-        run: |
-          make quality
-
       - name: Prepare local env and JWT keys
         run: |
           cp .env.example .env
@@ -42,6 +38,13 @@ jobs:
           openssl rsa -in secrets/jwt_private.pem -pubout -out secrets/jwt_public.pem
           chmod 600 secrets/jwt_private.pem
           chmod 644 secrets/jwt_public.pem
+
+      - name: Run quality gates
+        env:
+          PRIVATE_KEY_PATH: secrets/jwt_private.pem
+          PUBLIC_KEY_PATH: secrets/jwt_public.pem
+        run: |
+          make quality
 
       - name: Build and start Docker stack
         run: |
