@@ -3,7 +3,7 @@ SHELL := /usr/bin/env bash
 
 API ?= http://127.0.0.1:8000
 
-.PHONY: up down restart ps logs wait-api health smoke admin-smoke test-all status openapi openapi
+.PHONY: up down restart ps logs wait-api health smoke admin-smoke test-all status openapi lint test quality ci-local
 
 up:
 >docker compose up -d
@@ -68,3 +68,19 @@ status:
 openapi:
 >curl -fsS $(API)/openapi.json -o /tmp/proplus_openapi.json
 >./scripts/openapi_summary.py /tmp/proplus_openapi.json
+
+
+lint:
+>ruff check app scripts tests --select E,F --ignore E501
+
+test:
+>pytest
+
+quality:
+>$(MAKE) lint
+>$(MAKE) test
+
+ci-local:
+>$(MAKE) quality
+>$(MAKE) openapi
+>$(MAKE) test-all
