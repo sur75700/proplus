@@ -25,7 +25,12 @@ logs:
 wait-api:
 >@echo "👑 Waiting for API health..."
 >@for i in {1..90}; do \
->  STATUS="$$(docker inspect -f '{{.State.Health.Status}}' data_analytics-api-1 2>/dev/null || echo starting)"; \
+>  CID="$$(docker compose ps -q api 2>/dev/null || true)"; \
+>  if [ -z "$$CID" ]; then \
+>    STATUS="starting"; \
+>  else \
+>    STATUS="$$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$$CID" 2>/dev/null || echo starting)"; \
+>  fi; \
 >  echo "api health: $$STATUS"; \
 >  if [ "$$STATUS" = "healthy" ]; then exit 0; fi; \
 >  sleep 2; \

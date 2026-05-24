@@ -57,3 +57,15 @@ async def consume_reset_token(raw: str):
 
     await reset_tokens.update_one({"_id": doc["_id"]}, {"$set": {"used": True}})
     return doc
+
+
+async def create_email_verify_token(user_id, email: str | None = None, ttl_minutes: int = 60) -> str:
+    return await create_email_token(user_id, kind="verify", ttl_sec=ttl_minutes * 60)
+
+
+async def verify_email_token(raw: str):
+    return await consume_email_token(raw)
+
+
+async def use_reset_token(raw: str):
+    return await consume_reset_token(raw)
