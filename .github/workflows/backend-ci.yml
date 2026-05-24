@@ -3,10 +3,12 @@ name: ProPlus Backend CI
 on:
   push:
     branches:
+      - main
       - master
       - phase-1f-github-ci
   pull_request:
     branches:
+      - main
       - master
 
 jobs:
