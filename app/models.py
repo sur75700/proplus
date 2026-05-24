@@ -46,5 +46,9 @@ async def get_user(uid: str):
     return await users.find_one({"_id": ObjectId(uid)})
 
 
+async def get_user_by_id(uid: str):
+    return await get_user(uid)
+
+
 def jti_hash(jti: str) -> str:
     return hashlib.sha256(jti.encode()).hexdigest()
