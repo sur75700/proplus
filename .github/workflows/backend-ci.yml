@@ -5,7 +5,7 @@ on:
     branches:
       - main
       - master
-      - phase-1f-github-ci
+      - "phase-*"
   pull_request:
     branches:
       - main
