@@ -1,10 +1,19 @@
 # ProPlus API
 
-ProPlus API is a FastAPI backend platform with MongoDB, Redis, RS256 JWT authentication, admin RBAC, health checks, Docker Compose boot, and professional smoke tests.
+ProPlus API is a FastAPI backend platform with MongoDB, Redis, RS256 JWT authentication, admin RBAC, structured error responses, request ID tracing, health/readiness checks, Docker Compose boot, GitHub Actions CI, and professional smoke tests.
 
 ## Current Status
 
 Royal stable backend core.
+
+Current checkpoint:
+
+- Branch: `main`
+- Phase: `PHASE 1I — Backend Production Hardening`
+- CI: GitHub Actions green
+- Local test suite: 37 pytest tests
+- Quality gates: ruff + pytest
+- Full local verification: `make ci-local`
 
 Implemented:
 
@@ -16,13 +25,24 @@ Implemented:
 - refresh token rotation
 - refresh token reuse detection
 - logout token revocation
+- email verification flow
+- password reset flow
 - admin RBAC
 - Mongo indexes
 - system readiness checks
+- structured error responses
+- `X-Request-ID` response tracing
 - OpenAPI documentation polish
 - auth smoke test
 - admin smoke test
+- API route contract tests
+- schema validation tests
+- JWT/security utility tests
+- auth endpoint integration tests
+- admin endpoint integration tests
+- config validation tests
 - Makefile command center
+- clean product repo policy
 
 ## Stack
 
@@ -34,6 +54,9 @@ Implemented:
 - python-jose
 - passlib / bcrypt
 - Pydantic settings
+- pytest
+- ruff
+- GitHub Actions
 
 ## Quick Start
 
@@ -41,7 +64,15 @@ Start the stack:
 
     make up
 
-Run all checks:
+Run the full local verification chain:
+
+    make ci-local
+
+Run quality only:
+
+    make quality
+
+Run smoke tests only:
 
     make test-all
 
@@ -87,6 +118,43 @@ Readiness:
 
 Readiness checks MongoDB and Redis.
 
+Expected healthy readiness response:
+
+    {"ready":true,"checks":{"mongo":true,"redis":true}}
+
+## Structured Errors
+
+HTTP and validation errors use a structured response shape.
+
+Example:
+
+    {
+      "error": {
+        "code": "http_error",
+        "message": "No bearer token",
+        "status_code": 401,
+        "request_id": "example-request-id"
+      }
+    }
+
+Validation errors use:
+
+    {
+      "error": {
+        "code": "validation_error",
+        "message": "Request validation failed",
+        "status_code": 422,
+        "request_id": "example-request-id",
+        "details": []
+      }
+    }
+
+Every response includes:
+
+    X-Request-ID
+
+If the client sends `X-Request-ID`, the API returns the same value. Otherwise, the API generates one.
+
 ## Auth Endpoints
 
 - POST /auth/register
@@ -129,9 +197,13 @@ Start:
 
     make up
 
-Run all tests:
+Full local CI:
 
-    make test-all
+    make ci-local
+
+Quality gates:
+
+    make quality
 
 Auth smoke:
 
@@ -164,7 +236,7 @@ Do not run all Makefile commands in one line. In particular, do not run `make do
 Correct:
 
     make up
-    make test-all
+    make ci-local
 
 Incorrect:
 
@@ -177,7 +249,7 @@ Incorrect:
 - docs/dev-runbook.md
 - docs/api.md
 
-## Local Secrets
+## Local Secrets and Artifact Policy
 
 Never commit:
 
@@ -186,6 +258,8 @@ Never commit:
 - private keys
 - payloads
 - quarantine artifacts
+- generated dumps
+- generated reports
 - local Arsenal tools
 
 Expected local JWT files:
@@ -198,9 +272,13 @@ Docker uses:
 - PRIVATE_KEY_PATH=/run/secrets/jwt_private_key
 - PUBLIC_KEY_PATH=/run/secrets/jwt_public_key
 
+Ghost/Tor/local helper tools are separated from the product repository and kept under:
+
+    ~/Tools/ProPlus-Arsenal
+
 ## Current Phase
 
-PHASE 1E — Developer Experience and API Documentation Polish
+PHASE 1I — Backend Production Hardening
 
 Completed checkpoints include:
 
@@ -213,3 +291,12 @@ Completed checkpoints include:
 - OpenAPI polish
 - API guide
 - Makefile command center
+- GitHub Actions CI
+- generated artifact cleanup
+- API contract tests
+- JWT/security utility tests
+- auth endpoint integration tests
+- admin endpoint integration tests
+- structured error responses
+- request ID middleware
+- config validation coverage
