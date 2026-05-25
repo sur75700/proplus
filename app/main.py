@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 
 from .admin_v1 import router as admin_router
 from .auth_v2 import router as auth_router
+from .core.error_handlers import install_error_handlers, request_id_middleware
 from .core.redis_client import redis
 from .db import ensure_indexes, ping_mongo
 
@@ -55,6 +56,9 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
+
+app.middleware("http")(request_id_middleware)
+install_error_handlers(app)
 
 
 @app.get(

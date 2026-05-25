@@ -7,6 +7,16 @@ from app.main import app
 client = TestClient(app)
 
 
+def assert_error(response, status_code: int, message: str):
+    body = response.json()
+
+    assert response.status_code == status_code
+    assert body["error"]["code"] == "http_error"
+    assert body["error"]["status_code"] == status_code
+    assert body["error"]["message"] == message
+    assert body["error"]["request_id"]
+
+
 async def noop_async(*args, **kwargs):
     return None
 
@@ -14,8 +24,7 @@ async def noop_async(*args, **kwargs):
 def test_auth_me_without_bearer_returns_401():
     response = client.get("/auth/me")
 
-    assert response.status_code == 401
-    assert response.json()["detail"] == "No bearer token"
+    assert_error(response, 401, "No bearer token")
 
 
 def test_register_success_uses_email_verification_flow(monkeypatch):
@@ -74,8 +83,7 @@ def test_register_existing_email_returns_409(monkeypatch):
         },
     )
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "email already exists"
+    assert_error(response, 409, "email already exists")
 
 
 def test_login_unknown_user_returns_401(monkeypatch):
@@ -96,8 +104,7 @@ def test_login_unknown_user_returns_401(monkeypatch):
         },
     )
 
-    assert response.status_code == 401
-    assert response.json()["detail"] == "invalid credentials"
+    assert_error(response, 401, "invalid credentials")
 
 
 def test_refresh_rejects_access_token():
@@ -110,5 +117,4 @@ def test_refresh_rejects_access_token():
         },
     )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "not a refresh token"
+    assert_error(response, 400, "not a refresh token")

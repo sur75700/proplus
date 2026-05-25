@@ -11,6 +11,16 @@ from app.main import app
 client = TestClient(app)
 
 
+def assert_error(response, status_code: int, message: str):
+    body = response.json()
+
+    assert response.status_code == status_code
+    assert body["error"]["code"] == "http_error"
+    assert body["error"]["status_code"] == status_code
+    assert body["error"]["message"] == message
+    assert body["error"]["request_id"]
+
+
 async def fake_admin_required():
     return {
         "_id": ObjectId("507f1f77bcf86cd799439011"),
@@ -121,8 +131,7 @@ def test_admin_users_list_returns_items(monkeypatch):
 def test_admin_get_user_bad_object_id_returns_400():
     response = client.get("/admin/users/not-a-valid-object-id")
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "invalid object id"
+    assert_error(response, 400, "invalid object id")
 
 
 def test_admin_get_user_not_found_returns_404(monkeypatch):
@@ -131,8 +140,7 @@ def test_admin_get_user_not_found_returns_404(monkeypatch):
 
     response = client.get("/admin/users/507f1f77bcf86cd799439012")
 
-    assert response.status_code == 404
-    assert response.json()["detail"] == "User not found"
+    assert_error(response, 404, "User not found")
 
 
 def test_admin_set_role_updates_user_role(monkeypatch):
@@ -151,8 +159,7 @@ def test_admin_set_role_rejects_invalid_role():
     uid = "507f1f77bcf86cd799439012"
     response = client.post(f"/admin/users/{uid}/role", json={"role": "owner"})
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "role must be 'admin' or 'user'"
+    assert_error(response, 400, "role must be 'admin' or 'user'")
 
 
 def test_admin_lock_user_sets_locked_until(monkeypatch):
