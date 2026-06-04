@@ -1,3 +1,5 @@
+import logging
+from time import perf_counter
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
@@ -7,6 +9,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 
 REQUEST_ID_HEADER = "X-Request-ID"
+request_logger = logging.getLogger("uvicorn.error")
 
 
 def _request_id(request: Request) -> str:
@@ -18,8 +21,62 @@ async def request_id_middleware(request: Request, call_next):
     rid = _request_id(request)
     request.state.request_id = rid
 
-    response = await call_next(request)
+    method = request.method
+    path = request.url.path
+    started_at = perf_counter()
+
+    request_logger.info(
+        "request_started request_id=%s method=%s path=%s",
+        rid,
+        method,
+        path,
+        extra={
+            "request_id": rid,
+            "method": method,
+            "path": path,
+        },
+    )
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        duration_ms = round((perf_counter() - started_at) * 1000, 2)
+
+        request_logger.exception(
+            "request_failed request_id=%s method=%s path=%s status_code=%s duration_ms=%s",
+            rid,
+            method,
+            path,
+            500,
+            duration_ms,
+            extra={
+                "request_id": rid,
+                "method": method,
+                "path": path,
+                "status_code": 500,
+                "duration_ms": duration_ms,
+            },
+        )
+        raise
+
+    duration_ms = round((perf_counter() - started_at) * 1000, 2)
     response.headers[REQUEST_ID_HEADER] = rid
+
+    request_logger.info(
+        "request_completed request_id=%s method=%s path=%s status_code=%s duration_ms=%s",
+        rid,
+        method,
+        path,
+        response.status_code,
+        duration_ms,
+        extra={
+            "request_id": rid,
+            "method": method,
+            "path": path,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+        },
+    )
 
     return response
 
