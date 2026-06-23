@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from app.middleware.request_id import RequestContextMiddleware
 
 from .admin_v1 import router as admin_router
 from .auth_v2 import router as auth_router
@@ -56,6 +57,7 @@ app = FastAPI(
     openapi_url="/openapi.json",
     lifespan=lifespan,
 )
+app.add_middleware(RequestContextMiddleware)
 
 app.middleware("http")(request_id_middleware)
 install_error_handlers(app)

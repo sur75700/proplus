@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API="${API:-http://127.0.0.1:8000}"
+API="${API:-http://127.0.0.1:8100}"
 USER_EMAIL="${USER_EMAIL:-normal_$(date +%s)@example.com}"
 USER_PASS="${USER_PASS:-StrongPass12345}"
 ADMIN_EMAIL="${ADMIN_EMAIL:-admin_$(date +%s)@example.com}"

@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .RECIPEPREFIX := >
 
-API ?= http://127.0.0.1:8000
+API ?= http://127.0.0.1:8100
 
 .PHONY: up down restart ps logs wait-api health smoke admin-smoke test-all status openapi lint test quality ci-local
 
@@ -53,8 +53,8 @@ smoke:
 >API="$(API)" ./scripts/smoke.sh
 
 admin-smoke:
->export MONGO_URL="mongodb://localhost:27017/proplus"; \
->export REDIS_URL="redis://localhost:6379/0"; \
+>export MONGO_URL="mongodb://localhost:27018/proplus"; \
+>export REDIS_URL="redis://localhost:6380/0"; \
 >export PRIVATE_KEY_PATH="secrets/jwt_private.pem"; \
 >export PUBLIC_KEY_PATH="secrets/jwt_public.pem"; \
 >export EMAIL_DEV_MODE="true"; \

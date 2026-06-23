@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -e
-API=${API:-http://localhost:8000}
+API=${API:-http://127.0.0.1:8100}
 
 echo "[1] health"; curl -s ${API}/healthz; echo
 echo "[2] register"; curl -s -X POST ${API}/auth/register -H "Content-Type: application/json" -d '{"email":"a@a.com","password":"Password12345"}'; echo
