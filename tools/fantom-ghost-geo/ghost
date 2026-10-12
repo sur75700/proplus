@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+# FANTOM_GHOST — safe one-line GEO command interface (single GEO Tor 9250).
+# Delegates to verified, existing user-space ProPlus tools; does not change repos or system Tor.
+set -Eeuo pipefail
+umask 077
+
+BASE_CMD="${GHOST_PROPLUS_GEO_BIN:-$HOME/.local/bin/proplus-geo}"
+CONFIG="${GHOST_GEO_CONFIG:-$HOME/.local/state/fantom-ghost/geo-tor/torrc}"
+QA="${GHOST_GEO_QA_BIN:-$HOME/Загрузки/proplus-geo-switch-qa}"
+PRODUCT="${GHOST_PRODUCT_REPO:-$HOME/Projects/ProPlus/data_analytics}"
+
+say() { printf '%s\n' "$*"; }
+error() { printf 'STOP: %s\n' "$*" >&2; exit 2; }
+need() { [[ -x "$BASE_CMD" && ! -L "$BASE_CMD" ]] || error "Missing executable or symbolic link: $BASE_CMD"; }
+
+help() {
+cat <<'HELP'
+👻 FANTOM_GHOST — ONE-LINE GEO COMMAND CENTER
+
+  ghost jp             Japan exit + launch a NEW isolated GEO Firefox
+  ghost de             Germany exit + launch Firefox (requires exit verification)
+  ghost us             USA exit + launch Firefox (requires exit verification)
+  ghost japan          Same as ghost jp
+  ghost browser        Launch Firefox using CURRENT GEO policy
+  ghost set jp         Select country ONLY, do not open Firefox
+  ghost status         Read country policy, process status, and current Tor exit
+  ghost verify         Verify that exit is Tor (NOT a country GeoIP check)
+  ghost doctor         Read-only health summary + unresolved acceptance gates
+  ghost qa             Read-only switching preflight (Japan policy required)
+  ghost qa run         EXPLICIT DE → US → JP test; restarts GEO Tor 9250
+  ghost reset          Automatic exit selection; close GEO Firefox first
+  ghost stop           Stop GEO Tor 9250; close GEO Firefox first
+  ghost list           Country examples
+  ghost help           This help
+
+Changing country is between browsing sessions: existing GEO Firefox must be closed.
+Only GEO Tor SOCKS 127.0.0.1:9250 is controlled; Tor Browser is separate.
+Tor exit country may be unverified, unavailable, or misclassified by GeoIP providers.
+This Firefox ESR lab is NOT equal to Tor Browser and does not guarantee anonymity.
+HELP
+}
+
+browser_count() {
+python3 - <<'PY'
+import os
+count=0
+for entry in os.scandir('/proc'):
+    if not entry.name.isdigit():
+        continue
+    try:
+        exe=os.readlink(f'/proc/{entry.name}/exe').lower()
+        with open(f'/proc/{entry.name}/cmdline','rb') as stream:
+            args=stream.read().decode('utf-8','replace')
+        if 'firefox' in os.path.basename(exe) and 'fantom-geo-firefox-' in args:
+            count+=1
+    except (OSError, PermissionError):
+        continue
+print(count)
+PY
+}
+
+no_browser() {
+  command -v python3 >/dev/null || error 'python3 missing; cannot check GEO Firefox sessions'
+  local n
+  n="$(browser_count)" || error 'Cannot inspect browser sessions'
+  say "GEO_FIREFOX_PROCESS_COUNT=$n"
+  [[ "$n" == 0 ]] || error 'Close ALL GEO Firefox windows first. No process was stopped.'
+}
+
+policy() {
+  command -v python3 >/dev/null || error 'python3 missing'
+  python3 - "$CONFIG" <<'PY'
+from pathlib import Path
+import re,sys
+p=Path(sys.argv[1])
+if p.is_symlink():
+    print('unavailable'); sys.exit(2)
+if not p.is_file():
+    print('none'); sys.exit(0)
+try:
+    s=p.read_text(encoding='utf-8')
+except (OSError,UnicodeError):
+    print('unavailable'); sys.exit(2)
+m=re.findall(r'^\s*ExitNodes\s+\{([a-zA-Z]{2})\}\s*$',s,re.M)
+all_exit_lines=re.findall(r'^\s*ExitNodes\b.*$',s,re.I|re.M)
+if len(m)==1 and len(all_exit_lines)==1:
+    print(m[0].lower())
+elif not all_exit_lines:
+    print('auto')
+else:
+    print('ambiguous')
+PY
+}
+
+country() {
+  local name="${1,,}"
+  case "$name" in
+    japan|jp) printf 'jp\n';;
+    germany|de) printf 'de\n';;
+    usa|united-states|us) printf 'us\n';;
+    netherlands|nl) printf 'nl\n';;
+    france|fr) printf 'fr\n';;
+    uk|gb) printf 'gb\n';;
+    *) [[ "$name" =~ ^[a-z]{2}$ ]] && printf '%s\n' "$name" || return 1;;
+  esac
+}
+
+set_country() {
+  local code="$1" current
+  need
+  current="$(policy)" || error 'Cannot read GEO policy'
+  say "CURRENT_POLICY=$current TARGET_COUNTRY=$code"
+  [[ "$current" != 'ambiguous' && "$current" != 'unavailable' ]] || error 'Config is ambiguous/unavailable; inspect manually'
+  if [[ "$current" == "$code" ]]; then
+    say 'POLICY_UNCHANGED=YES; NO_TOR_RESTART'
+    say 'NOTE: Existing policy is not independent country proof.'
+    # This check is authoritative for Tor use, NOT the exit country.
+    "$BASE_CMD" verify
+    return
+  fi
+  no_browser
+  say 'COUNTRY_SWITCH=STARTED; existing controller will back up and verify/rollback'
+  "$BASE_CMD" set "$code" || error 'Country switch failed; controller rollback attempted. Inspect its output.'
+  local after
+  after="$(policy)" || error 'Cannot read policy after switch'
+  [[ "$after" == "$code" ]] || error "Post-switch config mismatch: $after"
+  say "COUNTRY_SWITCH=PASS POLICY=$after"
+  say 'NOTE: PASS means controller reported verification; external GeoIP sources can disagree.'
+}
+
+doctor() {
+  need
+  say '👻 FANTOM_GHOST — READ-ONLY GEO DOCTOR'
+  say "GEO_POLICY=$(policy)"
+  say "GEO_FIREFOX_PROCESS_COUNT=$(browser_count)"
+  if command -v ss >/dev/null; then
+    local port
+    for port in 9050 9150 9250; do
+      if ss -H -ltn | grep -Eq "127\.0\.0\.1:${port}[[:space:]]"; then
+        say "TOR_${port}_LOOPBACK=LISTEN"
+      else
+        say "TOR_${port}_LOOPBACK=NOT_OBSERVED"
+      fi
+    done
+    if ss -H -ltnu | grep -Eq ':5355[[:space:]]'; then
+      say 'LLMNR_LISTENER=PRESENT_REVIEW_REQUIRED'
+    else
+      say 'LLMNR_LISTENER=NOT_OBSERVED'
+    fi
+  else
+    say 'LISTENER_INSPECTION=SS_UNAVAILABLE'
+  fi
+  if [[ -d "$PRODUCT" ]] && git -C "$PRODUCT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    say "PRODUCT_BRANCH=$(git -C "$PRODUCT" branch --show-current)"
+    local git_state
+    if git_state="$(git -C "$PRODUCT" status --porcelain=v1)"; then
+      if [[ -z "$git_state" ]]; then
+        say 'PRODUCT_GIT=CLEAN'
+      else
+        say 'PRODUCT_GIT=DIRTY_REVIEW_REQUIRED'
+      fi
+    else
+      say 'PRODUCT_GIT=STATUS_UNAVAILABLE'
+    fi
+  else
+    say 'PRODUCT_GIT=UNAVAILABLE'
+  fi
+  say 'GEO_TOR_HTTPS_CHECK=START'
+  if "$BASE_CMD" verify; then
+    say 'GEO_TOR_HTTPS_CHECK=PASS'
+  else
+    say 'GEO_TOR_HTTPS_CHECK=FAIL'
+    return 1
+  fi
+  say 'FIREWALL=MANUAL_SUDO_CHECK_REQUIRED'
+  say 'BROWSER_DNS_WEBRTC=MANUAL_QA_REQUIRED'
+  say 'COUNTRY_GEOIP=NOT_PROVEN_BY_THIS_DOCTOR'
+  say 'MULTICOUNTRY_SWITCHING=NOT_PROVEN_BY_THIS_DOCTOR'
+  say 'FULL_FINAL_ACCEPTANCE=NOT_INFERRED'
+}
+
+launch_browser() {
+  need
+  no_browser
+  local current
+  current="$(policy)" || error 'Cannot read GEO policy'
+  [[ "$current" != none && "$current" != unavailable && "$current" != ambiguous ]] || error "Cannot launch with policy=$current"
+  say "BROWSER_POLICY=$current SOCKS=127.0.0.1:9250"
+  say 'Launching isolated Firefox ESR. It is NOT Tor Browser.'
+  exec "$BASE_CMD" browser
+}
+
+main() {
+  local action="${1:-help}" code
+  case "$action" in
+    help|-h|--help) [[ $# -le 1 ]] || error 'Unexpected args'; help ;;
+    status)
+      [[ $# == 1 ]] || error 'Usage: ghost status'
+      need
+      say "CONFIG_POLICY=$(policy)"
+      say "GEO_FIREFOX_PROCESS_COUNT=$(browser_count)"
+      "$BASE_CMD" status
+      ;;
+    verify) [[ $# == 1 ]] || error 'Usage: ghost verify'; need; "$BASE_CMD" verify ;;
+    doctor) [[ $# == 1 ]] || error 'Usage: ghost doctor'; doctor ;;
+    browser|open) [[ $# == 1 ]] || error 'Usage: ghost browser'; launch_browser ;;
+    list) [[ $# == 1 ]] || error 'Usage: ghost list'; need; "$BASE_CMD" list ;;
+    set)
+      [[ $# == 2 ]] || error 'Usage: ghost set <country>'
+      code="$(country "$2")" || error 'Invalid country; use two-letter code'
+      set_country "$code"
+      ;;
+    reset|stop)
+      [[ $# == 1 ]] || error "Usage: ghost $action"
+      need
+      no_browser
+      "$BASE_CMD" "$action"
+      ;;
+    qa)
+      [[ $# -le 2 ]] || error 'Usage: ghost qa [run]'
+      [[ -f "$QA" && ! -L "$QA" ]] || error "QA script not found: $QA"
+      if [[ $# == 1 ]]; then
+        exec bash "$QA" --preflight
+      elif [[ "$2" == run ]]; then
+        say 'EXPLICIT_LIVE_QA=YES; Germany/USA/Japan switches will restart GEO Tor 9250'
+        no_browser
+        exec bash "$QA" --run
+      else
+        error 'Usage: ghost qa [run]'
+      fi
+      ;;
+    *)
+      [[ $# == 1 ]] || error 'Use: ghost <country> (one country per invocation)'
+      code="$(country "$action")" || error "Unknown command: $action (try ghost help)"
+      # Always block if a GEO browser exists, even when policy already matches.
+      no_browser
+      set_country "$code"
+      launch_browser
+      ;;
+  esac
+}
+main "$@"

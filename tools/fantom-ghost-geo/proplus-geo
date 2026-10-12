@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# FANTOM_GHOST — ProPlus GEO Command Center
+# User-space wrapper for pre-existing ghost-country and ghost-firefox-geo.
+# Does not alter existing Firefox profiles, system Tor, Tor Browser, or product repositories.
+set -Eeuo pipefail
+umask 077
+
+GHOST_COUNTRY="${GHOST_COUNTRY_BIN:-$HOME/.local/bin/ghost-country}"
+GHOST_FIREFOX="${GHOST_FIREFOX_BIN:-$HOME/.local/bin/ghost-firefox-geo}"
+SOCKS="127.0.0.1:9250"
+
+say() { printf '%s\n' "$*"; }
+stop_error() { say "ERROR: $*" >&2; exit 1; }
+need() { [[ -x "$1" ]] || stop_error "Executable missing: $1"; }
+usage() {
+cat <<'HELP'
+👻 FANTOM_GHOST — PROPLUS GEO
+  proplus-geo status        Read existing GEO Tor status
+  proplus-geo verify        Verify current Tor exit (no config change)
+  proplus-geo browser       Open NEW isolated Firefox GEO profile
+  proplus-geo set jp        Select Japan (two-letter country code)
+  proplus-geo set de        Select Germany
+  proplus-geo reset         Automatic Tor exit selection (GEO 9250 only)
+  proplus-geo stop          Stop GEO 9250 only
+  proplus-geo list          Show example countries
+  proplus-geo help          Show this help
+
+Existing Firefox/Tor Browser profiles are never reconfigured.
+Country changes may interrupt active GEO browser sessions; close them first.
+HELP
+}
+
+verify() {
+  command -v curl >/dev/null || stop_error 'curl is unavailable'
+  command -v python3 >/dev/null || stop_error 'python3 is unavailable'
+  local result="" attempt exit_ip
+  for attempt in 1 2; do
+    say "VERIFY_ATTEMPT=$attempt" >&2
+    if result="$(curl --fail --silent --show-error --noproxy '' \
+      --connect-timeout 20 --max-time 65 \
+      --socks5-hostname "$SOCKS" \
+      https://check.torproject.org/api/ip)"; then
+      if exit_ip="$(python3 -c '
+import ipaddress,json,sys
+try:
+  obj=json.load(sys.stdin)
+  assert obj.get("IsTor") is True
+  ip=str(ipaddress.ip_address(obj["IP"]))
+except (AssertionError,KeyError,ValueError,TypeError):
+  sys.exit(1)
+print(ip)
+' <<< "$result")"; then
+        say "TOR_EXIT=$exit_ip"
+        say 'TOR_VERIFICATION=PASS'
+        say 'COUNTRY=NOT_VERIFIED_BY_THIS_COMMAND'
+        return 0
+      fi
+      say 'WARN: Tor verification response not valid' >&2
+    else
+      say 'WARN: HTTPS check failed, trying again if permitted' >&2
+    fi
+  done
+  stop_error 'GEO Tor verification failed. Existing services were not changed.'
+}
+
+main() {
+  local action="${1:-help}" code
+  case "$action" in
+    help|-h|--help) [[ $# -eq 0 || $# -eq 1 ]] || stop_error 'Unexpected arguments'; usage ;;
+    list) [[ $# -eq 1 ]] || stop_error 'Usage: proplus-geo list'; need "$GHOST_COUNTRY"; "$GHOST_COUNTRY" list ;;
+    status) [[ $# -eq 1 ]] || stop_error 'Usage: proplus-geo status'; need "$GHOST_COUNTRY"; "$GHOST_COUNTRY" status ;;
+    verify) [[ $# -eq 1 ]] || stop_error 'Usage: proplus-geo verify'; verify ;;
+    browser)
+      [[ $# -eq 1 ]] || stop_error 'Usage: proplus-geo browser'
+      need "$GHOST_FIREFOX"
+      say 'Launching an isolated Firefox ESR profile through GEO Tor 9250.'
+      exec "$GHOST_FIREFOX"
+      ;;
+    set)
+      [[ $# -eq 2 ]] || stop_error 'Usage: proplus-geo set <two-letter-code>'
+      code="${2,,}"
+      [[ "$code" =~ ^[a-z]{2}$ ]] || stop_error 'Country must be two ASCII letters'
+      need "$GHOST_COUNTRY"
+      say "TARGET_COUNTRY=$code"
+      say 'NOTE: Close currently running GEO Firefox sessions before switching.'
+      "$GHOST_COUNTRY" set "$code"
+      say 'COUNTRY_APPLY=FINISHED; backend verification performed by ghost-country'
+      ;;
+    reset) [[ $# -eq 1 ]] || stop_error 'Usage: proplus-geo reset'; need "$GHOST_COUNTRY"; "$GHOST_COUNTRY" reset ;;
+    stop) [[ $# -eq 1 ]] || stop_error 'Usage: proplus-geo stop'; need "$GHOST_COUNTRY"; "$GHOST_COUNTRY" stop ;;
+    *) stop_error "Unknown subcommand: $action" ;;
+  esac
+}
+main "$@"

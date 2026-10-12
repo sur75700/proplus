@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# FANTOM_GHOST F9 — single GEO Tor country-switching acceptance runner.
+# Uses existing proplus-geo and ghost-country. Does not touch system Tor, Tor Browser,
+# firewall, Docker, product Git or Firefox profiles. Explicit --run required to switch.
+set -Eeuo pipefail
+umask 077
+
+MODE="${1:---preflight}"
+[[ $# -le 1 && ( "$MODE" == '--preflight' || "$MODE" == '--run' ) ]] || {
+  echo 'USAGE: proplus-geo-switch-qa [--preflight|--run]' >&2
+  exit 2
+}
+
+COMMAND="${HOME}/.local/bin/proplus-geo"
+COUNTRY="${HOME}/.local/bin/ghost-country"
+CONFIG="${HOME}/.local/state/fantom-ghost/geo-tor/torrc"
+PRODUCT="${HOME}/Projects/ProPlus/data_analytics"
+SOCKS='127.0.0.1:9250'
+
+say() { printf '%s\n' "$*"; }
+stop() { say "[STOP] $*" >&2; exit 2; }
+need() { [[ -x "$1" ]] || stop "Missing executable: $1"; }
+
+browser_count() {
+  # Search the actual Firefox process executable/cmdline, not the test script text.
+  python3 - <<'PY'
+import os
+count=0
+for entry in os.scandir('/proc'):
+    if not entry.name.isdigit():
+        continue
+    try:
+        exe=os.readlink(f'/proc/{entry.name}/exe').lower()
+        args=open(f'/proc/{entry.name}/cmdline','rb').read().decode('utf-8','replace')
+        if 'firefox' in os.path.basename(exe) and 'fantom-geo-firefox-' in args:
+            count+=1
+    except (OSError, PermissionError):
+        continue
+print(count)
+PY
+}
+
+policy() {
+  [[ -r "$CONFIG" && ! -L "$CONFIG" ]] || { echo 'unavailable'; return; }
+  python3 - "$CONFIG" <<'PY'
+import re,sys
+s=open(sys.argv[1],encoding='utf-8').read()
+m=re.findall(r'^ExitNodes\s+\{([a-z]{2})\}\s*$',s,re.I|re.M)
+print(m[0].lower() if len(m)==1 else 'ambiguous')
+PY
+}
+
+preflight() {
+  say '👻 FANTOM_GHOST — SINGLE GEO SWITCH PRE-FLIGHT'
+  need "$COMMAND"
+  need "$COUNTRY"
+  command -v python3 >/dev/null || stop 'python3 missing'
+  command -v flock >/dev/null || stop 'flock missing'
+  command -v ss >/dev/null || stop 'ss missing'
+  command -v sha256sum >/dev/null || stop 'sha256sum missing'
+  [[ -r "$CONFIG" && ! -L "$CONFIG" ]] || stop 'GEO torrc unavailable or symlink'
+  local running
+  running="$(browser_count)"
+  say "GEO_FIREFOX_PROCESS_COUNT=$running"
+  [[ "$running" == '0' ]] || stop 'Close ALL GEO Firefox windows before country switching; no processes were stopped.'
+  local current
+  current="$(policy)"
+  say "CURRENT_POLICY=$current"
+  [[ "$current" == 'jp' ]] || stop 'This QA requires Japan as the initial policy. No automatic changes made.'
+  ss -H -ltn | grep -Eq '127\.0\.0\.1:9250[[:space:]]' || stop 'GEO port 9250 is not listening'
+  say 'GEO_9250_LISTENER=PASS'
+  for port in 9050 9150; do
+    if ss -H -ltn | grep -Eq "127\\.0\\.0\\.1:${port}[[:space:]]"; then
+      say "PROTECTED_${port}_LISTENER=PRESENT"
+    else
+      say "PROTECTED_${port}_LISTENER=NOT_OBSERVED"
+    fi
+  done
+  say 'GEO_TOR_HTTPS_CHECK=START'
+  "$COMMAND" verify
+  say 'PREFLIGHT=PASS'
+}
+
+preflight
+[[ "$MODE" == '--preflight' ]] && {
+  say 'CHANGES=NONE; run --run only after browser sessions are closed.'
+  exit 0
+}
+
+# Evidence directory and independent QA lock; underlying ghost-country also locks changes.
+STAMP="$(date +%Y%m%d-%H%M%S)"
+EVIDENCE="$HOME/Backups/FANTOM_GHOST/geo-switch-final-$STAMP-$$"
+mkdir -p "$EVIDENCE"
+chmod 700 "$EVIDENCE"
+exec 9>"$HOME/.local/state/fantom-ghost/geo-tor/qa-switch.lock"
+flock -n 9 || stop 'Another QA country-switching run is already active'
+cp -p -- "$CONFIG" "$EVIDENCE/torrc.preflight.bak"
+BASE_HASH="$(sha256sum "$EVIDENCE/torrc.preflight.bak" | awk '{print $1}')"
+[[ "$BASE_HASH" == "$(sha256sum "$CONFIG" | awk '{print $1}')" ]] || stop 'Preflight backup hash mismatch'
+[[ -d "$PRODUCT/.git" ]] || stop 'Product Git repository missing'
+BEFORE_GIT="$(git -C "$PRODUCT" status --porcelain=v1)"
+[[ -z "$BEFORE_GIT" ]] || stop 'Product repo is not clean; do not proceed with QA'
+BRANCH="$(git -C "$PRODUCT" symbolic-ref --quiet --short HEAD || true)"
+HEAD="$(git -C "$PRODUCT" rev-parse HEAD)"
+[[ "$BRANCH" == 'phase-1l-ghost-observability' ]] || stop "Unexpected branch: $BRANCH"
+
+RESTORE_REQUIRED=1
+RESTORE_OK=0
+FINISHED=0
+
+restore_japan() {
+  say 'RESTORE_JAPAN=STARTED'
+  local log="$EVIDENCE/restore-jp.log"
+  if "$COMMAND" set jp >"$log" 2>&1; then
+    cat "$log"
+    if grep -Fq 'COUNTRY_VERIFICATION=PASS' "$log" && \
+       grep -Fq 'GHOST_COUNTRY=SUCCESS POLICY=jp' "$log" && \
+       [[ "$(policy)" == 'jp' ]] && "$COMMAND" verify; then
+      say 'RESTORE_JAPAN=PASS'
+      RESTORE_OK=1
+      return 0
+    fi
+  else
+    cat "$log"
+  fi
+  say '[WARN] Restore command was not fully verified. Inspect GEO config/state and saved backup.' >&2
+  RESTORE_OK=0
+  return 1
+}
+
+finish() {
+  local rc=$?
+  trap - EXIT INT TERM
+  if [[ "$RESTORE_REQUIRED" == 1 ]]; then
+    restore_japan || rc=1
+  fi
+  local final_policy final_hash git_head git_status
+  final_policy="$(policy)"
+  final_hash="$(sha256sum "$CONFIG" 2>/dev/null | awk '{print $1}' || true)"
+  git_head="$(git -C "$PRODUCT" rev-parse HEAD 2>/dev/null || true)"
+  git_status="$(git -C "$PRODUCT" status --porcelain=v1 2>/dev/null || true)"
+  say "FINAL_POLICY=$final_policy"
+  if [[ "$final_hash" == "$BASE_HASH" ]]; then
+    say 'TORRC_EXACT_SHA256_RESTORED=PASS'
+  else
+    say '[WARN] TORRC_EXACT_SHA256_RESTORED=NO (inspect backup; do not overwrite blindly)'
+    rc=1
+  fi
+  if [[ "$git_head" == "$HEAD" && -z "$git_status" ]]; then
+    say 'PRODUCT_GIT_HEAD_AND_WORKTREE=UNCHANGED'
+  else
+    say '[FAIL] PRODUCT_GIT_CHANGED'; rc=1
+  fi
+  say "EVIDENCE=$EVIDENCE"
+  say 'SYSTEM_TOR_ACTION=NONE; TOR_BROWSER_ACTION=NONE; FIREWALL_ACTION=NONE'
+  say 'BROWSER_DNS_WEBRTC=MANUAL_QA_REQUIRED'
+  if [[ "$rc" == 0 && "$RESTORE_OK" == 1 && "$FINISHED" == 1 ]]; then
+    say 'COUNTRY_SWITCH_AUTOMATED_QA=PASS'
+  else
+    say 'COUNTRY_SWITCH_AUTOMATED_QA=REVIEW_REQUIRED'
+    rc=1
+  fi
+  exit "$rc"
+}
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+say "BACKUP=$EVIDENCE/torrc.preflight.bak"
+say "BASE_POLICY=jp"
+say 'WARNING: Country changes restart GEO Tor 9250. Do not reopen GEO Firefox until complete.'
+
+switch() {
+  local code="$1"
+  local result="$EVIDENCE/set-${code}.log"
+  local check="$EVIDENCE/verify-${code}.log"
+  [[ "$(browser_count)" == 0 ]] || { say '[FAIL] GEO Firefox reopened; stopping QA'; return 1; }
+  say "SWITCH_TO=$code STARTED"
+  if ! "$COMMAND" set "$code" >"$result" 2>&1; then
+    cat "$result"
+    say "[FAIL] SWITCH_TO=$code; underlying controller attempted its own rollback"
+    return 1
+  fi
+  cat "$result"
+  if ! grep -Fq 'COUNTRY_VERIFICATION=PASS' "$result" || \
+     ! grep -Fq "GHOST_COUNTRY=SUCCESS POLICY=$code" "$result" || \
+     [[ "$(policy)" != "$code" ]]; then
+    say "[FAIL] COUNTRY_PROOF_MISSING=$code"
+    return 1
+  fi
+  if ! "$COMMAND" verify >"$check" 2>&1; then
+    cat "$check"
+    say "[FAIL] EXIT_VERIFY=$code"
+    return 1
+  fi
+  cat "$check"
+  grep -Fq 'TOR_VERIFICATION=PASS' "$check" || { say "[FAIL] EXIT_VERIFY=$code"; return 1; }
+  say "SWITCH_TO=$code PASS"
+}
+
+switch de
+switch us
+switch jp
+RESTORE_REQUIRED=0
+RESTORE_OK=1
+FINISHED=1
+say 'COUNTRY_SEQUENCE=DE_US_JP_COMPLETED'

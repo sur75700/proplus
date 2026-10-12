@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# FANTOM_GHOST: isolated Firefox ESR profile routed via GEO Tor on 127.0.0.1:9250
+set -Eeuo pipefail
+umask 077
+command -v firefox-esr >/dev/null || { echo 'ERROR: firefox-esr not found' >&2; exit 1; }
+command -v curl >/dev/null || { echo 'ERROR: curl not found' >&2; exit 1; }
+echo '👻 FANTOM_GHOST — GEO FIREFOX LAB'
+echo '[01] TOR GEO SOCKS CHECK'
+if ! curl -fsS --noproxy '' --connect-timeout 20 --max-time 65 \
+  --socks5-hostname 127.0.0.1:9250 https://check.torproject.org/api/ip; then
+  echo 'ERROR: GEO Tor unavailable. First run: ghost-country set de' >&2
+  exit 1
+fi
+echo
+PROFILE="$(mktemp -d "${TMPDIR:-/tmp}/fantom-geo-firefox-XXXXXXXX")"
+chmod 700 "$PROFILE"
+cat > "$PROFILE/user.js" <<'PREFS'
+user_pref("network.proxy.type", 1);
+user_pref("network.proxy.socks", "127.0.0.1");
+user_pref("network.proxy.socks_port", 9250);
+user_pref("network.proxy.socks_version", 5);
+user_pref("network.proxy.socks_remote_dns", true);
+user_pref("network.proxy.no_proxies_on", "");
+user_pref("network.proxy.failover_direct", false);
+user_pref("network.trr.mode", 5);
+user_pref("media.peerconnection.enabled", false);
+user_pref("network.prefetch-next", false);
+user_pref("network.dns.disablePrefetch", true);
+PREFS
+chmod 600 "$PROFILE/user.js"
+echo "PROFILE=$PROFILE"
+echo 'SOCKS=127.0.0.1:9250'
+echo 'LAB_ONLY=YES; NOT_EQUAL_TO_TOR_BROWSER'
+echo '[02] STARTING FIREFOX ESR'
+exec firefox-esr --no-remote --profile "$PROFILE" https://check.torproject.org/

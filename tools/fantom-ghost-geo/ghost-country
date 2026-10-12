@@ -1,0 +1,335 @@
+#!/usr/bin/env python3
+"""FANTOM_GHOST F8 — isolated Tor exit-country lab (SOCKS 127.0.0.1:9250).
+
+Does not edit system Tor, Tor Browser, firewall, Docker, or project repositories.
+"""
+import argparse
+import fcntl
+import ipaddress
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, timezone
+
+PORT = 9250
+BASE = Path(os.environ.get('GHOST_GEO_HOME', str(Path.home() / '.local/state/fantom-ghost/geo-tor'))).expanduser().resolve()
+CONF = BASE / 'torrc'
+DATA = BASE / 'data'
+PID = BASE / 'tor.pid'
+LOG = BASE / 'tor.log'
+LOCK = BASE / 'lock'
+BACKUPS = BASE / 'backups'
+TOR = shutil.which('tor')
+CURL = shutil.which('curl')
+
+
+def out(msg):
+    print(msg, flush=True)
+
+
+def abort(msg):
+    raise RuntimeError(msg)
+
+
+def run(argv, *, timeout=30, check=False):
+    return subprocess.run(argv, text=True, capture_output=True, timeout=timeout, check=check)
+
+
+def make_dirs():
+    for path in (BASE, DATA, BACKUPS):
+        path.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.chmod(0o700)
+    for path in (CONF, PID):
+        if path.is_symlink():
+            abort(f'Refusing symbolic link: {path}')
+
+
+def pid_owned():
+    try:
+        pid = int(PID.read_text().strip())
+        cmdline = (Path('/proc') / str(pid) / 'cmdline').read_bytes().decode('utf-8', 'replace')
+        if str(CONF) not in cmdline or 'tor' not in cmdline.lower():
+            return None
+        os.kill(pid, 0)
+        return pid
+    except (ValueError, FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+        return None
+
+
+def socks_listening():
+    if not shutil.which('ss'):
+        abort('ss command missing')
+    p = run(['ss', '-H', '-ltn'], timeout=7)
+    return bool(re.search(r'127\.0\.0\.1:' + str(PORT) + r'\s', p.stdout))
+
+
+def config_for(code):
+    contents = [
+        '# FANTOM_GHOST GEO LAB — independent instance only',
+        f'SocksPort 127.0.0.1:{PORT}',
+        f'DataDirectory "{DATA}"',
+        f'PidFile "{PID}"',
+        f'Log notice file {LOG}',
+        'ClientOnly 1',
+        'CookieAuthentication 1',
+    ]
+    if code != 'auto':
+        contents.append(f'ExitNodes {{{code}}}')
+    return '\n'.join(contents) + '\n'
+
+
+def current_policy():
+    if not CONF.is_file():
+        return 'none'
+    text = CONF.read_text()
+    match = re.search(r'^ExitNodes\s+\{([a-z]{2})\}\s*$', text, re.M | re.I)
+    return match.group(1).lower() if match else 'auto'
+
+
+def write_atomic(content, path):
+    fd, temporary = tempfile.mkstemp(prefix='.torrc.', dir=BASE)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(content)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        path.chmod(0o600)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def verify_config(content):
+    fd, tmp = tempfile.mkstemp(prefix='.candidate-', dir=BASE)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(content)
+        p = run([TOR, '--verify-config', '-f', tmp], timeout=20)
+        if p.returncode:
+            abort('Tor rejected candidate configuration:\n' + (p.stdout + p.stderr)[-1800:])
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def wait_stop(pid):
+    os.kill(pid, signal.SIGTERM)
+    for _ in range(60):
+        if pid_owned() is None:
+            return
+        time.sleep(.25)
+    abort(f'Tor PID {pid} did not stop. No forced kill performed.')
+
+
+def start_instance():
+    p = run([TOR, '-f', str(CONF), '--RunAsDaemon', '1'], timeout=30)
+    if p.returncode:
+        abort('Tor launch failed:\n' + (p.stderr + p.stdout)[-1800:])
+    deadline = time.monotonic() + 40
+    while time.monotonic() < deadline:
+        if pid_owned() and socks_listening():
+            out(f'ISOLATED_TOR=STARTED 127.0.0.1:{PORT}')
+            return
+        time.sleep(1)
+    abort('Isolated Tor did not expose loopback SOCKS within 40 seconds')
+
+
+def curl_json(url, *, timeout=18):
+    p = run([CURL, '--fail', '--silent', '--show-error', '--noproxy', '',
+             '--connect-timeout', '5', '--max-time', str(timeout),
+             '--socks5-hostname', f'127.0.0.1:{PORT}', url], timeout=timeout + 3)
+    if p.returncode:
+        abort('SOCKS HTTPS failed: ' + p.stderr.strip()[-350:])
+    try:
+        return json.loads(p.stdout)
+    except json.JSONDecodeError:
+        abort('Non-JSON response from verification service')
+
+
+def lookup_country(ip):
+    ipaddress.ip_address(ip)
+    providers = [
+        (f'https://ipwho.is/{ip}', 'country_code'),
+        (f'https://ipapi.co/{ip}/json/', 'country_code'),
+    ]
+    for url, key in providers:
+        try:
+            result = curl_json(url, timeout=14)
+            if result.get('success') is False or result.get('error'):
+                continue
+            code = result.get(key)
+            if isinstance(code, str) and re.fullmatch(r'[A-Za-z]{2}', code):
+                return code.lower()
+        except (RuntimeError, subprocess.TimeoutExpired, ValueError):
+            pass
+    return None
+
+
+def verify_exit(expected=None, deadline=90):
+    if not CURL:
+        abort('curl command missing')
+    last_error = 'No response'
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        try:
+            response = curl_json('https://check.torproject.org/api/ip', timeout=16)
+            if response.get('IsTor') is not True:
+                abort('Tor Project did not confirm IsTor=true')
+            ip = response.get('IP', '')
+            ipaddress.ip_address(ip)
+            out(f'TOR_EXIT={ip} IsTor=true')
+            if expected in (None, 'auto'):
+                out('TOR_VERIFICATION=PASS')
+                return
+            country = lookup_country(ip)
+            out(f'GEO_COUNTRY={country or "UNAVAILABLE"} EXPECTED={expected}')
+            if country is None:
+                abort('GeoIP providers unavailable or rate limited; cannot confirm selected country')
+            if country != expected:
+                abort('Exit GeoIP mismatches requested country')
+            out('COUNTRY_VERIFICATION=PASS')
+            return
+        except (RuntimeError, subprocess.TimeoutExpired, ValueError) as error:
+            last_error = str(error)
+            if 'mismatches' in last_error or 'providers unavailable' in last_error or 'did not confirm' in last_error:
+                break
+            time.sleep(4)
+    abort('Verification failed: ' + last_error)
+
+
+def change(code):
+    if not TOR:
+        abort('Tor executable missing')
+    if not CURL:
+        abort('curl executable missing')
+    make_dirs()
+    with LOCK.open('a+') as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        old_running = pid_owned() is not None
+        old_present = CONF.exists()
+        old_content = CONF.read_text() if old_present else None
+        out(f'PREVIOUS_POLICY={current_policy()} PREVIOUS_RUNNING={old_running}')
+        if socks_listening() and not old_running:
+            abort(f'Port {PORT} in use by an unowned process; refusing to interfere')
+        candidate = config_for(code)
+        verify_config(candidate)
+        out('CANDIDATE_CONFIG=VALID')
+        stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        if old_present:
+            backup = BACKUPS / f'torrc-{stamp}-{os.getpid()}.bak'
+            shutil.copy2(CONF, backup)
+            backup.chmod(0o600)
+            out(f'BACKUP={backup}')
+        else:
+            out('BACKUP=FRESH_INSTANCE_NO_PREVIOUS_CONFIG')
+        changed = False
+        try:
+            if old_running:
+                wait_stop(pid_owned())
+            write_atomic(candidate, CONF)
+            changed = True
+            start_instance()
+            verify_exit(code)
+            out(f'GHOST_COUNTRY=SUCCESS POLICY={code} SOCKS=127.0.0.1:{PORT}')
+        except Exception as error:
+            out(f'APPLY_OR_VERIFY_FAILED={error}')
+            if changed or (old_running and pid_owned() is None):
+                out('ROLLBACK=STARTED')
+                try:
+                    current_pid = pid_owned()
+                    if current_pid:
+                        wait_stop(current_pid)
+                    if old_present:
+                        write_atomic(old_content, CONF)
+                        verify_config(old_content)
+                    else:
+                        CONF.unlink(missing_ok=True)
+                    if old_running:
+                        start_instance()
+                        out('ROLLBACK_OLD_INSTANCE_RESTARTED=YES')
+                    out('ROLLBACK_CONFIG_RESTORED=YES')
+                except Exception as rollback_error:
+                    out(f'CRITICAL_ROLLBACK_INCOMPLETE={rollback_error}')
+                    raise SystemExit(3)
+            raise SystemExit(2)
+
+
+def status():
+    out(f'GEO_INSTANCE=127.0.0.1:{PORT}')
+    out(f'CONFIG={CONF}')
+    out(f'POLICY={current_policy()}')
+    pid = pid_owned()
+    out(f'RUNNING={bool(pid)} PID={pid or "none"}')
+    if pid and socks_listening():
+        try:
+            verify_exit(None, deadline=22)
+        except Exception as e:
+            out(f'TOR_VERIFICATION=WARN {e}')
+    else:
+        out('TOR_VERIFICATION=NOT_RUNNING')
+
+
+def stop():
+    if not BASE.exists():
+        out('GEO_INSTANCE=ALREADY_STOPPED')
+        return
+    with LOCK.open('a+') as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        pid = pid_owned()
+        if pid:
+            wait_stop(pid)
+            out('GEO_INSTANCE=STOPPED')
+        elif socks_listening():
+            abort('Port 9250 is active but owner does not match this instance; not stopping it')
+        else:
+            out('GEO_INSTANCE=ALREADY_STOPPED')
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Isolated Tor GEO control on localhost:9250 (system Tor untouched)')
+    sub = parser.add_subparsers(dest='action', required=True)
+    for name in ('dry-run', 'set'):
+        p = sub.add_parser(name)
+        p.add_argument('country', help='Two-letter country code, e.g. de, us, nl')
+    for name in ('status', 'reset', 'stop', 'list'):
+        sub.add_parser(name)
+    args = parser.parse_args()
+    if args.action == 'list':
+        out('EXAMPLES: de Germany | us USA | nl Netherlands | ch Switzerland | fr France | gb UK | se Sweden | jp Japan | sg Singapore | ca Canada | au Australia | br Brazil | in India')
+        out('Availability depends on Tor exit relays. Country codes are not a guarantee.')
+    elif args.action == 'status':
+        status()
+    elif args.action == 'stop':
+        stop()
+    else:
+        code = getattr(args, 'country', 'auto').lower()
+        if not re.fullmatch(r'[a-z]{2}', code) and code != 'auto':
+            abort('Country must be a two-letter ISO 3166 code')
+        if args.action == 'dry-run':
+            if code == 'auto':
+                abort('Use reset for automatic selection')
+            out('DRY_RUN=YES NO_FILE_CHANGE NO_SERVICE_CHANGE')
+            out(f'ISOLATED_SOCKS=127.0.0.1:{PORT}')
+            out(f'COUNTRY={code}')
+            out(f'CONFIG_PREVIEW:\n{config_for(code)}')
+            out('APPLY_WITH: ghost-country set ' + code)
+        else:
+            change(code)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (RuntimeError, OSError, subprocess.TimeoutExpired, BlockingIOError) as e:
+        print(f'GHOST_COUNTRY=ERROR: {e}', file=sys.stderr)
+        sys.exit(1)
